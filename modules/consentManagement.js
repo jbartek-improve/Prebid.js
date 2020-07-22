@@ -198,9 +198,21 @@ function lookupIabConsent(cmpSuccess, cmpError, hookConfig) {
   function callCmpWhileInIframe(commandName, cmpFrame, moduleCallback) {
     let apiName = (cmpVersion === 2) ? '__tcfapi' : '__cmp';
 
-    /* Setup up a __cmp function to do the postMessage and stash the callback.
-      This function behaves (from the caller's perspective identicially to the in-frame __cmp call */
-    window[apiName] = function (cmd, arg, callback) {
+    /** when we get the return message, call the stashed callback */
+    window.addEventListener('message', readPostMessageResponse, false);
+
+    /* Setup up a __cmp or _tcfapi function to do the postMessage and stash the callback.
+      This function behaves (from the caller's perspective identicially to the in-frame __cmp/_tcfapi call */
+    if (cmpVersion === 1) {
+      window[apiName] = (cmd, arg, callback) => sendMessage(cmd, cmpVersion, callback, arg);
+      window[apiName](commandName, undefined, moduleCallback);
+    } else {
+      // cmpVersion >= 2
+      window[apiName] = (cmd, version, callback, arg) => sendMessage(cmd, version, callback, arg);
+      window[apiName](commandName, cmpVersion, moduleCallback);
+    }
+
+    function sendMessage(cmd, version, callback, arg) {
       let callId = Math.random() + '';
       let callName = `${apiName}Call`;
       let msg = {
@@ -210,17 +222,11 @@ function lookupIabConsent(cmpSuccess, cmpError, hookConfig) {
           callId: callId
         }
       };
-      if (cmpVersion !== 1) msg[callName].version = cmpVersion;
+      if (version !== 1) msg[callName].version = version;
 
       cmpCallbacks[callId] = callback;
       cmpFrame.postMessage(msg, '*');
     }
-
-    /** when we get the return message, call the stashed callback */
-    window.addEventListener('message', readPostMessageResponse, false);
-
-    // call CMP
-    window[apiName](commandName, null, moduleCallback);
 
     function readPostMessageResponse(event) {
       let cmpDataPkgName = `${apiName}Return`;
